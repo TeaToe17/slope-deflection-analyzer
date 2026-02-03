@@ -38,23 +38,29 @@ export default function ShearForceDiagram({
     ctx.lineTo(width - padding, height - padding);
     ctx.stroke();
 
-    // Get span IDs from analysis results to maintain order
-    const spanIds = Object.keys(analysisResults.spans).sort(
-      (a, b) => Number(a) - Number(b)
-    );
+    const spans = Object.entries(analysisResults.spans)
+      .map(([spanId, spanData]) => {
+        const start =
+          spanData.axis === "y"
+            ? spanData.vertical_distance_from_left_end_origin
+            : spanData.horizontal_distance_from_left_end_origin;
+        const end = start + spanData.length;
+        return { spanId, spanData, start, end };
+      })
+      .sort((a, b) => a.start - b.start || a.end - b.end);
 
-    // Calculate total span length from analysis results
-    let totalLength = 0;
-    spanIds.forEach((spanId) => {
-      const spanData = analysisResults.spans[spanId];
-      totalLength += spanData.length;
-    });
+    if (spans.length === 0) {
+      return;
+    }
+
+    const minSpanPosition = Math.min(...spans.map((span) => span.start));
+    const maxSpanPosition = Math.max(...spans.map((span) => span.end));
+    const totalLength = maxSpanPosition - minSpanPosition || 1;
 
     // Find min and max shear values
     let minShear = 0;
     let maxShear = 0;
-    spanIds.forEach((spanId) => {
-      const spanData = analysisResults.spans[spanId];
+    spans.forEach(({ spanData }) => {
       minShear = Math.min(minShear, spanData.shear_left, spanData.shear_right);
       maxShear = Math.max(maxShear, spanData.shear_left, spanData.shear_right);
     });
@@ -66,15 +72,11 @@ export default function ShearForceDiagram({
     ctx.lineWidth = 2;
     ctx.beginPath();
 
-    let xPos = padding;
     let firstPoint = true;
 
-    spanIds.forEach((spanId) => {
-      const spanResults = analysisResults.spans[spanId];
-      if (!spanResults) return;
-
-      const shearLeft = spanResults.shear_left;
-      const shearRight = spanResults.shear_right;
+    spans.forEach(({ spanData, start, end }) => {
+      const shearLeft = spanData.shear_left;
+      const shearRight = spanData.shear_right;
 
       // Convert shear value to canvas Y position
       const yLeft =
@@ -82,16 +84,17 @@ export default function ShearForceDiagram({
       const yRight =
         height - padding - ((shearRight - minShear) / shearRange) * plotHeight;
 
-      const spanPixelWidth = (spanResults.length / totalLength) * plotWidth;
+      const spanStart =
+        padding + ((start - minSpanPosition) / totalLength) * plotWidth;
+      const spanEnd =
+        padding + ((end - minSpanPosition) / totalLength) * plotWidth;
 
       if (firstPoint) {
-        ctx.moveTo(xPos, yLeft);
+        ctx.moveTo(spanStart, yLeft);
         firstPoint = false;
       }
-      ctx.lineTo(xPos, yLeft);
-      ctx.lineTo(xPos + spanPixelWidth, yRight);
-
-      xPos += spanPixelWidth;
+      ctx.lineTo(spanStart, yLeft);
+      ctx.lineTo(spanEnd, yRight);
     });
 
     ctx.stroke();
@@ -101,25 +104,22 @@ export default function ShearForceDiagram({
     ctx.beginPath();
     ctx.moveTo(padding, height - padding);
 
-    xPos = padding;
-    spanIds.forEach((spanId) => {
-      const spanResults = analysisResults.spans[spanId];
-      if (!spanResults) return;
-
-      const shearLeft = spanResults.shear_left;
-      const shearRight = spanResults.shear_right;
+    spans.forEach(({ spanData, start, end }) => {
+      const shearLeft = spanData.shear_left;
+      const shearRight = spanData.shear_right;
 
       const yLeft =
         height - padding - ((shearLeft - minShear) / shearRange) * plotHeight;
       const yRight =
         height - padding - ((shearRight - minShear) / shearRange) * plotHeight;
 
-      const spanPixelWidth = (spanResults.length / totalLength) * plotWidth;
+      const spanStart =
+        padding + ((start - minSpanPosition) / totalLength) * plotWidth;
+      const spanEnd =
+        padding + ((end - minSpanPosition) / totalLength) * plotWidth;
 
-      ctx.lineTo(xPos, yLeft);
-      ctx.lineTo(xPos + spanPixelWidth, yRight);
-
-      xPos += spanPixelWidth;
+      ctx.lineTo(spanStart, yLeft);
+      ctx.lineTo(spanEnd, yRight);
     });
 
     ctx.lineTo(width - padding, height - padding);
