@@ -36,17 +36,33 @@ export default function BendingMomentDiagram({
       return { spanData, startX, startY, endX, endY, axisDirection };
     });
 
+    const spans = Object.entries(analysisResults.spans)
+      .map(([spanId, spanData]) => {
+        const start =
+          spanData.axis === "y"
+            ? spanData.vertical_distance_from_left_end_origin
+            : spanData.horizontal_distance_from_left_end_origin;
+        const end = start + spanData.length;
+        return { spanId, spanData, start, end };
+      })
+      .sort((a, b) => a.start - b.start || a.end - b.end);
+
     if (spans.length === 0) {
       return;
     }
 
-    const maxSpanLength = Math.max(...spans.map((span) => span.spanData.length));
+    const minSpanPosition = Math.min(...spans.map((span) => span.start));
+    const maxSpanPosition = Math.max(...spans.map((span) => span.end));
+    const totalLength = maxSpanPosition - minSpanPosition || 1;
 
-    const perSpanSamples = spans.map((span) => {
-      const loads = normalizeLoads(span.spanData);
-      const positions = buildSamplePositions(
-        span.spanData.length,
-        loads
+    // Find min and max moment values
+    let minMoment = 0;
+    let maxMoment = 0;
+    spans.forEach(({ spanData }) => {
+      minMoment = Math.min(
+        minMoment,
+        spanData.moment_left,
+        spanData.moment_right
       );
       const momentValues = positions.map((position) =>
         computeMomentAt(
@@ -59,52 +75,65 @@ export default function BendingMomentDiagram({
       return { ...span, positions, momentValues };
     });
 
-    const maxMoment = Math.max(
-      ...perSpanSamples.flatMap((span) =>
-        span.momentValues.map((value) => Math.abs(value))
-      )
-    );
+    const momentRange = maxMoment - minMoment || 1;
 
-    const momentScale = maxMoment > 0 ? (maxSpanLength * 0.6) / maxMoment : 0;
+    // Draw bending moment diagram
+    ctx.strokeStyle = "#3b82f6";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
 
-    const diagramPoints = perSpanSamples.flatMap(
-      ({ startX, startY, axisDirection, positions, momentValues }) => {
-        const points: { x: number; y: number }[] = [];
-        positions.forEach((position, index) => {
-          const baseX = startX + axisDirection.x * position;
-          const baseY = startY + axisDirection.y * position;
-          const momentValue = momentValues[index];
-          points.push({ x: baseX, y: baseY });
-          points.push({
-            x: baseX + axisDirection.normalX * momentValue * momentScale,
-            y: baseY + axisDirection.normalY * momentValue * momentScale,
-          });
-        });
-        return points;
+    let firstPoint = true;
+
+    spans.forEach(({ spanData, start, end }) => {
+      const momentLeft = spanData.moment_left;
+      const momentRight = spanData.moment_right;
+
+      // Convert moment value to canvas Y position
+      const yLeft =
+        height -
+        padding -
+        ((momentLeft - minMoment) / momentRange) * plotHeight;
+      const yRight =
+        height -
+        padding -
+        ((momentRight - minMoment) / momentRange) * plotHeight;
+
+      const spanStart =
+        padding + ((start - minSpanPosition) / totalLength) * plotWidth;
+      const spanEnd =
+        padding + ((end - minSpanPosition) / totalLength) * plotWidth;
+
+      if (firstPoint) {
+        ctx.moveTo(spanStart, yLeft);
+        firstPoint = false;
       }
-    );
+      ctx.lineTo(spanStart, yLeft);
+      ctx.lineTo(spanEnd, yRight);
+    });
+
+    ctx.stroke();
+
+    // Fill area under curve
+    ctx.fillStyle = "rgba(59, 130, 246, 0.2)";
+    ctx.beginPath();
+    ctx.moveTo(padding, height - padding);
+
+    spans.forEach(({ spanData, start, end }) => {
+      const momentLeft = spanData.moment_left;
+      const momentRight = spanData.moment_right;
 
     let minX = Math.min(...diagramPoints.map((point) => point.x));
     let maxX = Math.max(...diagramPoints.map((point) => point.x));
     let minY = Math.min(...diagramPoints.map((point) => point.y));
     let maxY = Math.max(...diagramPoints.map((point) => point.y));
 
-    if (minX === maxX) {
-      minX -= 1;
-      maxX += 1;
-    }
-    if (minY === maxY) {
-      minY -= 1;
-      maxY += 1;
-    }
+      const spanStart =
+        padding + ((start - minSpanPosition) / totalLength) * plotWidth;
+      const spanEnd =
+        padding + ((end - minSpanPosition) / totalLength) * plotWidth;
 
-    const scaleX = (width - 2 * padding) / (maxX - minX);
-    const scaleY = (height - 2 * padding) / (maxY - minY);
-    const scale = Math.min(scaleX, scaleY);
-
-    const toCanvas = (x: number, y: number) => ({
-      x: padding + (x - minX) * scale,
-      y: height - padding - (y - minY) * scale,
+      ctx.lineTo(spanStart, yLeft);
+      ctx.lineTo(spanEnd, yRight);
     });
 
     // Draw axes

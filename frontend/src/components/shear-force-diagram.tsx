@@ -27,80 +27,97 @@ export default function ShearForceDiagram({
     ctx.fillStyle = "white";
     ctx.fillRect(0, 0, width, height);
 
-    const spans = Object.entries(analysisResults.spans).map(([, spanData]) => {
-      const startX = spanData.horizontal_distance_from_left_end_origin;
-      const startY = -spanData.vertical_distance_from_left_end_origin;
-      const axisDirection = getAxisDirection(spanData.axis);
-      const endX = startX + axisDirection.x * spanData.length;
-      const endY = startY + axisDirection.y * spanData.length;
-      return { spanData, startX, startY, endX, endY, axisDirection };
-    });
+    // Draw axes
+    ctx.strokeStyle = "#333";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(padding, padding);
+    ctx.lineTo(padding, height - padding);
+    ctx.lineTo(width - padding, height - padding);
+    ctx.stroke();
+
+    const spans = Object.entries(analysisResults.spans)
+      .map(([spanId, spanData]) => {
+        const start =
+          spanData.axis === "y"
+            ? spanData.vertical_distance_from_left_end_origin
+            : spanData.horizontal_distance_from_left_end_origin;
+        const end = start + spanData.length;
+        return { spanId, spanData, start, end };
+      })
+      .sort((a, b) => a.start - b.start || a.end - b.end);
 
     if (spans.length === 0) {
       return;
     }
 
-    const maxSpanLength = Math.max(...spans.map((span) => span.spanData.length));
+    const minSpanPosition = Math.min(...spans.map((span) => span.start));
+    const maxSpanPosition = Math.max(...spans.map((span) => span.end));
+    const totalLength = maxSpanPosition - minSpanPosition || 1;
 
-    const perSpanSamples = spans.map((span) => {
-      const loads = normalizeLoads(span.spanData);
-      const positions = buildSamplePositions(
-        span.spanData.length,
-        loads,
-        true
-      );
-      const shearValues = positions.map((position) =>
-        computeShearAt(position, span.spanData.shear_left, loads)
-      );
-      return { ...span, positions, shearValues };
+    // Find min and max shear values
+    let minShear = 0;
+    let maxShear = 0;
+    spans.forEach(({ spanData }) => {
+      minShear = Math.min(minShear, spanData.shear_left, spanData.shear_right);
+      maxShear = Math.max(maxShear, spanData.shear_left, spanData.shear_right);
     });
 
-    const maxShear = Math.max(
-      ...perSpanSamples.flatMap((span) =>
-        span.shearValues.map((value) => Math.abs(value))
-      )
-    );
+    const shearRange = maxShear - minShear || 1;
 
-    const shearScale = maxShear > 0 ? (maxSpanLength * 0.6) / maxShear : 0;
+    // Draw shear force diagram
+    ctx.strokeStyle = "#ef4444";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
 
-    const diagramPoints = perSpanSamples.flatMap(
-      ({ startX, startY, axisDirection, positions, shearValues }) => {
-        const points: { x: number; y: number }[] = [];
-        positions.forEach((position, index) => {
-          const baseX = startX + axisDirection.x * position;
-          const baseY = startY + axisDirection.y * position;
-          const shearValue = shearValues[index];
-          points.push({ x: baseX, y: baseY });
-          points.push({
-            x: baseX + axisDirection.normalX * shearValue * shearScale,
-            y: baseY + axisDirection.normalY * shearValue * shearScale,
-          });
-        });
-        return points;
+    let firstPoint = true;
+
+    spans.forEach(({ spanData, start, end }) => {
+      const shearLeft = spanData.shear_left;
+      const shearRight = spanData.shear_right;
+
+      // Convert shear value to canvas Y position
+      const yLeft =
+        height - padding - ((shearLeft - minShear) / shearRange) * plotHeight;
+      const yRight =
+        height - padding - ((shearRight - minShear) / shearRange) * plotHeight;
+
+      const spanStart =
+        padding + ((start - minSpanPosition) / totalLength) * plotWidth;
+      const spanEnd =
+        padding + ((end - minSpanPosition) / totalLength) * plotWidth;
+
+      if (firstPoint) {
+        ctx.moveTo(spanStart, yLeft);
+        firstPoint = false;
       }
-    );
+      ctx.lineTo(spanStart, yLeft);
+      ctx.lineTo(spanEnd, yRight);
+    });
+
+    ctx.stroke();
+
+    // Fill area under curve (above and below axis)
+    ctx.fillStyle = "rgba(239, 68, 68, 0.2)";
+    ctx.beginPath();
+    ctx.moveTo(padding, height - padding);
+
+    spans.forEach(({ spanData, start, end }) => {
+      const shearLeft = spanData.shear_left;
+      const shearRight = spanData.shear_right;
 
     let minX = Math.min(...diagramPoints.map((point) => point.x));
     let maxX = Math.max(...diagramPoints.map((point) => point.x));
     let minY = Math.min(...diagramPoints.map((point) => point.y));
     let maxY = Math.max(...diagramPoints.map((point) => point.y));
 
-    if (minX === maxX) {
-      minX -= 1;
-      maxX += 1;
-    }
-    if (minY === maxY) {
-      minY -= 1;
-      maxY += 1;
-    }
+      const spanStart =
+        padding + ((start - minSpanPosition) / totalLength) * plotWidth;
+      const spanEnd =
+        padding + ((end - minSpanPosition) / totalLength) * plotWidth;
 
-    const scaleX = (width - 2 * padding) / (maxX - minX);
-    const scaleY = (height - 2 * padding) / (maxY - minY);
-    const scale = Math.min(scaleX, scaleY);
-
-    const toCanvas = (x: number, y: number) => ({
-      x: padding + (x - minX) * scale,
-      y: height - padding - (y - minY) * scale,
+      ctx.lineTo(spanStart, yLeft);
+      ctx.lineTo(spanEnd, yRight);
     });
 
     // Draw axes
